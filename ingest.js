@@ -5,12 +5,15 @@ import { v4 as uuidv4 } from "uuid"
 import dotenv from "dotenv"
 import { db } from "./firebase.js"
 import { splitIntoSentences, buildPassages } from "./sentence.js"
+import ContentProcessor from "./processor.js"
 
 // Load environment variables
 dotenv.config()
 
 const EPUB_DIR = process.env.EPUB_DIR || "./epubs"
 const CHAR_LIMIT = parseInt(process.env.CHAR_LIMIT) || 10000 // ~25 pages approximation
+
+const secretProcessor = new ContentProcessor()
 
 function cleanText(html) {
   return html
@@ -60,7 +63,10 @@ async function ingestBook(epubFile) {
 
   const bookId = uuidv4()
   const sentences = splitIntoSentences(text)
-  const passages = buildPassages(sentences)
+  const rawPassages = buildPassages(sentences)
+  
+  const interestingPassages = await secretProcessor.interesting(rawPassages)
+  const passages = interestingPassages.map(p => p.text)
 
   const bookRef = db.collection("books").doc(bookId)
 
@@ -75,11 +81,14 @@ async function ingestBook(epubFile) {
 
   passages.forEach((p, index) => {
     const passageRef = bookRef.collection("passages").doc()
+    const enhanced = secretProcessor.enhancePassageMetadata({ text: p }, text)
+    
     batch.set(passageRef, {
       text: p,
       length: p.length,
       order: index,
       createdAt: new Date(),
+      interestingness: enhanced.interestingness
     })
   })
 
